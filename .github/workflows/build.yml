@@ -209,7 +209,7 @@ jobs:
       run: |
         set -euo pipefail
         if [ -z "${KEYSTORE_BASE64:-}" ]; then
-          echo "::error::KEYSTORE_BASE64 secret is missing or empty."
+          echo "::error::KEYSTORE_BASE64 secret is missing or empty in GitHub Repository Secrets. Go to repository Settings > Secrets and variables > Actions and add KEYSTORE_BASE64."
           exit 1
         fi
         mkdir -p keystore
