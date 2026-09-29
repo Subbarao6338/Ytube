@@ -19,7 +19,7 @@ internal class VideoWatchTracker(
     private val preferences = ThemePreferences(context)
     private var active: Watch? = null
 
-    fun start(player: Player, video: () -> VideoItem?, thresholdMs: Long = 10_000L) {
+    fun start(player: Player, video: () -> VideoItem?, thresholdMs: Long = 1_000L) {
         close()
         val item = video() ?: return
         if (item.videoId.startsWith("external:")) return
