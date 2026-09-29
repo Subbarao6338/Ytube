@@ -41,6 +41,13 @@ class VideoWatchProgressTest {
         assertTrue(clock.sample(71_000L, true, true))
     }
 
+    @Test fun `one second threshold qualifies playback after one second`() {
+        val clock = VideoWatchClock(1_000L)
+        clock.sample(0L, true, true)
+        assertTrue(clock.sample(1_000L, true, true))
+        assertEquals(1_000L, clock.playedMs)
+    }
+
     @Test fun `pause preserves actual watched time without adding idle time`() {
         val clock = VideoWatchClock(5_000L)
         clock.sample(0L, true, true)
