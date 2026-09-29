@@ -3224,8 +3224,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     // deduplicated, including the first.
                     val visible = videoHistoryRepository.withoutRemoved(page.videos)
                     _historyVideos.value = if (request.continuation == null) {
-                        visible.ifEmpty { videoHistoryRepository.getHistory() }
-                            .distinctBy { it.videoId }
+                        (visible + videoHistoryRepository.getHistory()).distinctBy { it.videoId }
                     } else (_historyVideos.value + visible).distinctBy { it.videoId }
                 }
                 _isHistoryLoading.value = false

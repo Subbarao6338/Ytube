@@ -612,9 +612,8 @@ class PlayerViewModel(private val context: Context) : ViewModel() {
                         if (!isResolutionTransition) {
                             val currentSongId = it.id
                             playRecordingJob = viewModelScope.launch {
-                                // Wait for 15 seconds of playback before counting as a 'play'
-                                // This prevents skips and resolution changes from inflating stats.
-                                delay(15_000)
+                                // Wait for 1 second of playback before counting as a 'play'
+                                delay(1_000)
                                 // A cold-start session restore fires this transition too but
                                 // never plays; only count it once playback actually ran.
                                 if (isActive && (_isPlaying.value || controller?.playWhenReady == true)) {

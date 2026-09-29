@@ -3117,11 +3117,7 @@ class YouTubeRepository(private val context: Context) {
             val session = sessionManager.captureSession() ?: return@withContext
             val cpn = generateCpn()
 
-            // This install's own minted token, which every other InnerTube call
-            // already rides on. The literal is the last resort it was always
-            // documented to be: a hardcoded visitor id identifies a stranger's
-            // session, and a missing one now answers LOGIN_REQUIRED.
-            val visitorData = cachedVisitorDataOrNull() ?: "Cgt6SUNYVzB2VkJDbyjGrrSmBg%3D%3D"
+            val visitorData = getVisitorData()
 
             // Client constants - using WEB_REMIX (web player)
             val clientName = "WEB_REMIX"
@@ -3136,7 +3132,7 @@ class YouTubeRepository(private val context: Context) {
                             "clientName": "$clientName",
                             "clientVersion": "$clientVersion",
                             "hl": "en",
-                            "gl": "US",
+                            "gl": "${contentRegion()}",
                             "visitorData": "$visitorData"
                         }
                     },
@@ -3154,7 +3150,7 @@ class YouTubeRepository(private val context: Context) {
                 .url(playerUrl)
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .authenticate(session)
-                .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .addHeader("User-Agent", BROWSER_USER_AGENT)
                 .addHeader("Origin", "https://music.youtube.com")
                 .addHeader("Referer", "https://music.youtube.com/")
                 .addHeader("X-Goog-Api-Format-Version", "1")
@@ -3826,34 +3822,25 @@ class YouTubeRepository(private val context: Context) {
             if (contents != null) {
                 for (i in 0 until contents.length()) {
                     val item = contents.optJSONObject(i) ?: continue
-                    
+
+                    // 0. Direct item check (e.g. videoRenderer / compactVideoRenderer / lockupViewModel / shortsLockupViewModel)
+                    parseAnyVideoItem(item)?.let { videos.add(it) }
+
                     // 1. RichItemRenderer (Home Grid)
                     val richItem = item.optJSONObject("richItemRenderer")
                     if (richItem != null) {
                         val content = richItem.optJSONObject("content")
-                        
-                        // Handler for VideoRenderer (Old UI)
-                        content?.optJSONObject("videoRenderer")?.let { 
-                            parseVideoRenderer(it)?.let { v -> videos.add(v) } 
-                        }
-                        
-                        // Handler for LockupViewModel (New UI)
-                        content?.optJSONObject("lockupViewModel")?.let {
-                            parseLockupViewModel(it)?.let { v -> videos.add(v) }
+                        if (content != null) {
+                            parseAnyVideoItem(content)?.let { v -> videos.add(v) }
                         }
                     }
-                    
+
                     // 2. ItemSectionRenderer (flat lists, e.g. FEhistory's date-grouped sections)
                     val itemSection = item.optJSONObject("itemSectionRenderer")?.optJSONArray("contents")
                     if (itemSection != null) {
                         for (j in 0 until itemSection.length()) {
                             val sectionItem = itemSection.optJSONObject(j) ?: continue
-                            sectionItem.optJSONObject("videoRenderer")?.let {
-                                parseVideoRenderer(it)?.let { v -> videos.add(v) }
-                            }
-                            sectionItem.optJSONObject("lockupViewModel")?.let {
-                                parseLockupViewModel(it)?.let { v -> videos.add(v) }
-                            }
+                            parseAnyVideoItem(sectionItem)?.let { v -> videos.add(v) }
                         }
                     }
 
@@ -3862,14 +3849,7 @@ class YouTubeRepository(private val context: Context) {
                     if (richSection != null) {
                         val shelfItems = parseItemsFromShelf(richSection)
                         shelfItems.forEach { shelfItem ->
-                             // Check for LockupViewModel in shelf
-                             if (shelfItem.has("lockupViewModel")) {
-                                  parseLockupViewModel(shelfItem.optJSONObject("lockupViewModel"))?.let { v -> videos.add(v) }
-                             } else if (shelfItem.has("videoRenderer")) {
-                                  parseVideoRenderer(shelfItem.optJSONObject("videoRenderer"))?.let { v -> videos.add(v) }
-                             } else if (shelfItem.has("gridVideoRenderer")) { // Search results often use this
-                                  parseVideoRenderer(shelfItem.optJSONObject("gridVideoRenderer"))?.let { v -> videos.add(v) }
-                             }
+                            parseAnyVideoItem(shelfItem)?.let { v -> videos.add(v) }
                         }
                     }
                 }
@@ -3879,6 +3859,40 @@ class YouTubeRepository(private val context: Context) {
             KLog.e("YouTubeRepo", "Could not parse watch history", e)
         }
         return videos.distinctBy { it.videoId }.take(limit)
+    }
+
+    private fun parseAnyVideoItem(node: org.json.JSONObject): VideoItem? {
+        val videoRenderer = node.optJSONObject("videoRenderer")
+            ?: node.optJSONObject("compactVideoRenderer")
+            ?: node.optJSONObject("gridVideoRenderer")
+            ?: node.optJSONObject("playlistVideoRenderer")
+            ?: node.optJSONObject("reelItemRenderer")
+        if (videoRenderer != null) {
+            return parseVideoRenderer(videoRenderer)
+        }
+        val lockup = node.optJSONObject("lockupViewModel")
+        if (lockup != null) {
+            return parseLockupViewModel(lockup)
+        }
+        val shortsLockup = node.optJSONObject("shortsLockupViewModel")
+        if (shortsLockup != null) {
+            val shorts = parseShortsLockup(shortsLockup)
+            if (shorts != null) {
+                return VideoItem(
+                    videoId = shorts.videoId,
+                    title = shorts.title,
+                    channelName = "",
+                    thumbnailUrl = shorts.thumbnailUrl,
+                    duration = 0L,
+                    viewCount = shorts.viewCount,
+                    isShort = true
+                )
+            }
+        }
+        if (node.has("videoId") || node.has("contentId")) {
+            return parseVideoRenderer(node)
+        }
+        return null
     }
     
     // ============================================================
@@ -9201,24 +9215,58 @@ class YouTubeRepository(private val context: Context) {
             val renderers = mutableListOf<org.json.JSONObject>()
             findObjectsByKey(root, "notificationRenderer", renderers)
             renderers.mapNotNull { renderer ->
-                val message = renderer.optJSONObject("shortMessage")?.optString("simpleText")
-                    ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                fun lastThumb(key: String): String? {
-                    val thumbs = renderer.optJSONObject(key)?.optJSONArray("thumbnails") ?: return null
+                val message = getRunText(renderer.optJSONObject("shortMessage"))
+                    ?: getRunText(renderer.optJSONObject("notificationText"))
+                    ?: getRunText(renderer.optJSONObject("message"))
+                    ?: return@mapNotNull null
+                if (message.isBlank()) return@mapNotNull null
+
+                fun lastThumb(obj: org.json.JSONObject?): String? {
+                    if (obj == null) return null
+                    val thumbs = obj.optJSONArray("thumbnails")
+                        ?: obj.optJSONArray("sources")
+                        ?: return null
                     var url = thumbs.optJSONObject((thumbs.length() - 1).coerceAtLeast(0))
                         ?.optString("url")?.takeIf { it.isNotBlank() }
                     if (url?.startsWith("//") == true) url = "https:$url"
                     return url
                 }
+
+                fun findThumb(vararg keys: String): String? {
+                    for (key in keys) {
+                        renderer.optJSONObject(key)?.let { lastThumb(it) }?.let { return it }
+                        val found = mutableListOf<org.json.JSONObject>()
+                        findObjectsByKey(renderer, key, found)
+                        found.firstNotNullOfOrNull { lastThumb(it) }?.let { return it }
+                    }
+                    return null
+                }
+
+                val avatarUrl = findThumb("thumbnail", "channelThumbnail", "avatar")
+                val videoThumbUrl = findThumb("videoThumbnail", "customThumbnail")
+
+                var videoId = renderer.optJSONObject("navigationEndpoint")
+                    ?.optJSONObject("watchEndpoint")?.optString("videoId")
+                    ?.takeIf { it.isNotBlank() }
+
+                if (videoId == null) {
+                    val watchEndpoints = mutableListOf<org.json.JSONObject>()
+                    findObjectsByKey(renderer, "watchEndpoint", watchEndpoints)
+                    videoId = watchEndpoints.firstNotNullOfOrNull {
+                        it.optString("videoId").takeIf { id -> id.isNotBlank() }
+                    }
+                }
+
+                val sentTime = getRunText(renderer.optJSONObject("sentTimeText")).orEmpty()
+                val isRead = renderer.optBoolean("read", false) || renderer.optBoolean("isRead", false)
+
                 NotificationItem(
                     message = message,
-                    sentTime = renderer.optJSONObject("sentTimeText")?.optString("simpleText").orEmpty(),
-                    channelAvatarUrl = lastThumb("thumbnail"),
-                    videoThumbnailUrl = lastThumb("videoThumbnail"),
-                    videoId = renderer.optJSONObject("navigationEndpoint")
-                        ?.optJSONObject("watchEndpoint")?.optString("videoId")
-                        ?.takeIf { it.isNotBlank() },
-                    isRead = renderer.optBoolean("read", false)
+                    sentTime = sentTime,
+                    channelAvatarUrl = avatarUrl,
+                    videoThumbnailUrl = videoThumbUrl,
+                    videoId = videoId,
+                    isRead = isRead
                 )
             }
         } catch (e: Exception) {
