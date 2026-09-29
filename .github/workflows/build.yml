@@ -208,7 +208,7 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p keystore
-        echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > keystore/ivormusic.jks
+        printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > keystore/ivormusic.jks
 
     - name: Build Release APK
       env:
