@@ -205,10 +205,27 @@ jobs:
     - name: Decode keystore
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       run: |
         set -euo pipefail
+        if [ -z "${KEYSTORE_BASE64:-}" ]; then
+          echo "::error::KEYSTORE_BASE64 secret is missing or empty."
+          exit 1
+        fi
         mkdir -p keystore
         printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > keystore/ivormusic.jks
+
+        if [ ! -s keystore/ivormusic.jks ]; then
+          echo "::error::Decoded keystore file is empty. Check KEYSTORE_BASE64 secret."
+          exit 1
+        fi
+
+        if [ -n "${KEYSTORE_PASSWORD:-}" ]; then
+          if ! keytool -list -keystore keystore/ivormusic.jks -storepass "$KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+            echo "::error::Failed to read keystore or invalid KEYSTORE_PASSWORD. Check KEYSTORE_BASE64 and KEYSTORE_PASSWORD secrets in repository settings."
+            exit 1
+          fi
+        fi
 
     - name: Build Release APK
       env:
