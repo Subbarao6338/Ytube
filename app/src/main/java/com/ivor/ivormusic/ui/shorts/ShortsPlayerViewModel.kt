@@ -999,7 +999,7 @@ class ShortsPlayerViewModel(application: android.app.Application) : AndroidViewM
         }
 
         _exoPlayer?.let { player ->
-            watchTracker.start(player, { _currentVideo.value }, thresholdMs = 5_000L)
+            watchTracker.start(player, { _currentVideo.value }, thresholdMs = 1_000L)
         }
     }
 
