@@ -297,6 +297,11 @@ jobs:
       run: |
         set -euo pipefail
 
+        if [ -z "${BOT_TOKEN:-}" ]; then
+          echo "TELEGRAM_BOT_TOKEN secret is not set. Skipping Telegram notification."
+          exit 0
+        fi
+
         esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "$1"; }
 
         telegram_ok() {
