@@ -3884,8 +3884,7 @@ class YouTubeRepository(private val context: Context) {
                     channelName = "",
                     thumbnailUrl = shorts.thumbnailUrl,
                     duration = 0L,
-                    viewCount = shorts.viewCount,
-                    isShort = true
+                    viewCount = shorts.viewCount
                 )
             }
         }
