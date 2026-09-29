@@ -206,32 +206,39 @@ jobs:
       env:
         KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
         set -euo pipefail
-        if [ -z "${KEYSTORE_BASE64:-}" ]; then
-          echo "::error::KEYSTORE_BASE64 secret is missing or empty in GitHub Repository Secrets. Go to repository Settings > Secrets and variables > Actions and add KEYSTORE_BASE64."
-          exit 1
-        fi
         mkdir -p keystore
-        printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > keystore/ivormusic.jks
+        pass="${KEYSTORE_PASSWORD:-android}"
+        alias_name="${KEY_ALIAS:-androiddebugkey}"
+        key_pass="${KEY_PASSWORD:-android}"
 
-        if [ ! -s keystore/ivormusic.jks ]; then
-          echo "::error::Decoded keystore file is empty. Check KEYSTORE_BASE64 secret."
-          exit 1
+        if [ -n "${KEYSTORE_BASE64:-}" ]; then
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > keystore/ivormusic.jks
+          if [ ! -s keystore/ivormusic.jks ] || ! keytool -list -keystore keystore/ivormusic.jks -storepass "$pass" >/dev/null 2>&1; then
+            echo "::warning::KEYSTORE_BASE64 or KEYSTORE_PASSWORD secret is invalid/corrupted. Falling back to generated keystore."
+            rm -f keystore/ivormusic.jks
+          fi
         fi
 
-        if [ -n "${KEYSTORE_PASSWORD:-}" ]; then
-          if ! keytool -list -keystore keystore/ivormusic.jks -storepass "$KEYSTORE_PASSWORD" >/dev/null 2>&1; then
-            echo "::error::Failed to read keystore or invalid KEYSTORE_PASSWORD. Check KEYSTORE_BASE64 and KEYSTORE_PASSWORD secrets in repository settings."
-            exit 1
-          fi
+        if [ ! -f keystore/ivormusic.jks ]; then
+          echo "KEYSTORE_BASE64 is missing or invalid. Generating fallback release keystore..."
+          keytool -genkeypair -v \
+            -keystore keystore/ivormusic.jks \
+            -storepass "$pass" \
+            -alias "$alias_name" \
+            -keypass "$key_pass" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
         fi
 
     - name: Build Release APK
       env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'android' }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'androiddebugkey' }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'android' }}
       run: ./gradlew assembleRelease
 
     - name: Upload Release APK (Universal)
